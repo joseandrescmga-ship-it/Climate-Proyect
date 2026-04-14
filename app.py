@@ -178,7 +178,6 @@ def pantalla_inicio():
     st.title("🤖 ROBOT VIGILANTE CLIMÁTICO")
     st.markdown("---")
     
-    # Columna central para el formulario
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
@@ -233,11 +232,9 @@ def pantalla_inicio():
 def pantalla_principal():
     df = st.session_state.df
     
-    # Barra lateral SOLO con el umbral de alerta
     with st.sidebar:
         st.header("⚙️ Configuración")
         
-        # Slider para umbral de alerta
         umbral = st.slider("🌡️ Umbral de alerta por calor (°C)", 20, 45, st.session_state.umbral_calor, 1)
         st.session_state.umbral_calor = umbral
         
@@ -255,7 +252,6 @@ def pantalla_principal():
         st.caption("Datos proporcionados por AEMET")
         st.caption("📍 Los colores en el mapa indican la temperatura")
     
-    # Título de la pantalla principal
     st.title("🤖 ROBOT VIGILANTE CLIMÁTICO")
     st.markdown("**Datos en tiempo real de AEMET**")
     st.markdown("---")
@@ -379,16 +375,28 @@ def pantalla_principal():
             except:
                 st.warning("No se pudo cargar el mapa")
         
-        # Gráfico
+        # Visualización de datos
         st.subheader("📊 Visualización de datos")
         
         if 'ubi' in df_actual.columns:
-            top_datos = df_actual.nlargest(10, 'temp')[['ubi', 'temp']]
+            # Agrupar por nombre de estación para evitar duplicados
+            df_agrupado_local = df_actual.groupby('ubi')['temp'].max().reset_index()
+            df_agrupado_local = df_agrupado_local.sort_values('temp', ascending=False)
+            top_local = df_agrupado_local.head(10)
+            
             fig, ax = plt.subplots(figsize=(12, 6))
-            ax.bar(range(len(top_datos)), top_datos['temp'], color='skyblue')
-            ax.set_xticks(range(len(top_datos)))
-            ax.set_xticklabels(top_datos['ubi'], rotation=45, ha='right', fontsize=9)
+            barras = ax.bar(range(len(top_local)), top_local['temp'], color='skyblue', edgecolor='navy', linewidth=1)
+            ax.set_xticks(range(len(top_local)))
+            ax.set_xticklabels(top_local['ubi'], rotation=45, ha='right', fontsize=9)
             ax.set_ylabel('Temperatura (°C)')
+            ax.set_title(f'Temperaturas en {nombre_actual}', fontsize=14, fontweight='bold')
+            ax.grid(axis='y', alpha=0.3)
+            
+            for barra, temp in zip(barras, top_local['temp']):
+                ax.text(barra.get_x() + barra.get_width()/2, barra.get_height() + 0.3,
+                       f"{temp:.1f}°C", ha='center', va='bottom', fontsize=9)
+            
+            plt.tight_layout()
             st.pyplot(fig)
         
         if st.button("🗑️ Limpiar esta vista"):
@@ -397,18 +405,62 @@ def pantalla_principal():
             st.rerun()
     
     # =========================================
-    # TOP NACIONAL
+    # TOP 10 ESTACIONES MÁS CÁLIDAS (AGRUPADO POR NOMBRE EXACTO)
     # =========================================
-    st.subheader("🏆 Top 10 ciudades más cálidas de España")
+    st.subheader("🏆 Top 10 estaciones más cálidas de España")
     
     if 'ubi' in df.columns:
-        top10 = df.nlargest(10, 'temp')[['ubi', 'temp']]
+        # Agrupar por nombre de estación (evitar duplicados por múltiples mediciones)
+        # Usamos max() para mostrar la temperatura más alta registrada en esa estación
+        df_agrupado = df.groupby('ubi')['temp'].max().reset_index()
+        df_agrupado = df_agrupado.sort_values('temp', ascending=False)
+        
+        # Mostrar información de cuántas estaciones únicas hay
+        st.caption(f"📊 Total de estaciones únicas: {len(df_agrupado)} | Mostrando las 10 más cálidas")
+        
+        top10 = df_agrupado.head(10)
+        
         fig, ax = plt.subplots(figsize=(14, 6))
-        ax.bar(range(len(top10)), top10['temp'], color='coral')
+        colores = plt.cm.RdYlGn_r(np.linspace(0, 0.7, len(top10)))
+        barras = ax.bar(range(len(top10)), top10['temp'], color=colores, edgecolor='darkred', linewidth=1.5)
+        
         ax.set_xticks(range(len(top10)))
         ax.set_xticklabels(top10['ubi'], rotation=45, ha='right', fontsize=10)
-        ax.set_ylabel('Temperatura (°C)')
+        ax.set_ylabel('Temperatura (°C)', fontsize=12)
+        ax.set_title('Top 10 estaciones más cálidas de España', fontsize=14, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+        
+        for barra, temp in zip(barras, top10['temp']):
+            ax.text(barra.get_x() + barra.get_width()/2, barra.get_height() + 0.5,
+                   f"{temp:.1f}°C", ha='center', va='bottom', fontsize=10, fontweight='bold')
+        
+        plt.tight_layout()
         st.pyplot(fig)
+        
+        # =========================================
+        # TOP 10 ESTACIONES MÁS FRÍAS
+        # =========================================
+        st.subheader("❄️ Top 10 estaciones más frías de España")
+        
+        df_agrupado_min = df.groupby('ubi')['temp'].min().reset_index()
+        df_agrupado_min = df_agrupado_min.sort_values('temp', ascending=True)
+        top10_frias = df_agrupado_min.head(10)
+        
+        fig2, ax2 = plt.subplots(figsize=(14, 6))
+        barras2 = ax2.bar(range(len(top10_frias)), top10_frias['temp'], color='skyblue', edgecolor='navy', linewidth=1.5)
+        
+        ax2.set_xticks(range(len(top10_frias)))
+        ax2.set_xticklabels(top10_frias['ubi'], rotation=45, ha='right', fontsize=10)
+        ax2.set_ylabel('Temperatura (°C)', fontsize=12)
+        ax2.set_title('Top 10 estaciones más frías de España', fontsize=14, fontweight='bold')
+        ax2.grid(axis='y', alpha=0.3)
+        
+        for barra, temp in zip(barras2, top10_frias['temp']):
+            ax2.text(barra.get_x() + barra.get_width()/2, barra.get_height() + 0.5,
+                   f"{temp:.1f}°C", ha='center', va='bottom', fontsize=10, fontweight='bold')
+        
+        plt.tight_layout()
+        st.pyplot(fig2)
     
     # =========================================
     # ALERTAS
@@ -418,8 +470,11 @@ def pantalla_principal():
     alertas = df[df['temp'] >= st.session_state.umbral_calor]
     if len(alertas) > 0:
         st.error(f"🔴 ¡ATENCIÓN! {len(alertas)} estaciones superan {st.session_state.umbral_calor}°C")
+        if 'ubi' in df.columns:
+            alertas_mostrar = alertas.drop_duplicates(subset=['ubi'])[['ubi', 'temp']].head(10)
+            st.dataframe(alertas_mostrar, use_container_width=True)
     else:
-        st.success(f"✅ Todo bajo control. Máxima: {temp_max}°C")
+        st.success(f"✅ Todo bajo control a nivel nacional. Máxima: {temp_max}°C")
     
     # =========================================
     # EXPORTAR
