@@ -15,10 +15,6 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🤖 ROBOT VIGILANTE CLIMÁTICO")
-st.markdown("**Conecta con AEMET, analiza el clima por ciudad**")
-st.markdown("---")
-
 # =====================================================
 # INICIALIZAR ESTADO DE SESIÓN
 # =====================================================
@@ -34,6 +30,10 @@ if 'ciudad_actual' not in st.session_state:
     st.session_state.ciudad_actual = None
 if 'df_ciudad_actual' not in st.session_state:
     st.session_state.df_ciudad_actual = None
+if 'api_key_validada' not in st.session_state:
+    st.session_state.api_key_validada = False
+if 'umbral_calor' not in st.session_state:
+    st.session_state.umbral_calor = 30
 
 # =====================================================
 # MAPEO MANUAL DE PROVINCIAS/REGIONES
@@ -67,32 +67,6 @@ def asignar_region(ciudad):
             if keyword in ciudad_upper:
                 return region
     return "OTRAS"
-
-# =====================================================
-# BARRA LATERAL
-# =====================================================
-with st.sidebar:
-    st.header("⚙️ Configuración")
-    
-    api_key = st.text_input(
-        "🔑 API Key de AEMET",
-        type="password",
-        help="Obtén tu clave en https://opendata.aemet.es"
-    )
-    
-    umbral_calor = st.slider("🌡️ Umbral de alerta por calor (°C)", 20, 45, 30, 1)
-    
-    ejecutar = st.button("🚀 EJECUTAR ROBOT", type="primary")
-    
-    st.markdown("---")
-    
-    if st.button("🗑️ Limpiar resultados"):
-        st.session_state.datos_cargados = False
-        st.session_state.df = None
-        st.session_state.mostrar_resultados = False
-        st.session_state.ciudad_actual = None
-        st.session_state.df_ciudad_actual = None
-        st.rerun()
 
 # =====================================================
 # FUNCIONES
@@ -156,59 +130,139 @@ def hacer_prediccion_ciudad(df_ciudad, nombre_ciudad):
         'icono': icono
     }
 
-# =====================================================
-# EJECUCIÓN PRINCIPAL
-# =====================================================
-if ejecutar:
-    if not api_key:
-        st.error("❌ Por favor, introduce tu API Key")
+def cargar_datos(api_key):
+    """Carga los datos y los guarda en session_state"""
+    with st.spinner("🔍 Validando API Key..."):
+        es_valida = validar_api_key(api_key)
+    
+    if not es_valida:
+        st.error("❌ API Key inválida. Verifica tu clave.")
+        return False
+    
+    with st.spinner("📡 Descargando datos de AEMET..."):
+        datos_clima = obtener_datos(api_key)
+    
+    if datos_clima is None:
+        st.error("❌ Error al obtener los datos")
+        return False
+    
+    df = pd.DataFrame(datos_clima)
+    
+    if 'ta' in df.columns:
+        df['temp'] = pd.to_numeric(df['ta'], errors='coerce')
     else:
-        with st.spinner("🔍 Validando API Key..."):
-            es_valida = validar_api_key(api_key)
-        
-        if not es_valida:
-            st.error("❌ API Key inválida. Verifica tu clave.")
-        else:
-            st.success("✅ API Key validada")
-            
-            with st.spinner("📡 Descargando datos de AEMET..."):
-                datos_clima = obtener_datos(api_key)
-            
-            if datos_clima is None:
-                st.error("❌ Error al obtener los datos")
-            else:
-                df = pd.DataFrame(datos_clima)
-                st.success(f"✅ Descargados {len(df)} registros")
-                
-                if 'ta' in df.columns:
-                    df['temp'] = pd.to_numeric(df['ta'], errors='coerce')
-                else:
-                    st.error("No se encontró columna de temperatura")
-                    st.stop()
-                
-                for col in ['lat', 'lon']:
-                    if col in df.columns:
-                        df[col] = pd.to_numeric(df[col], errors='coerce')
-                
-                df = df.dropna(subset=['temp'])
-                
-                if 'ubi' in df.columns:
-                    ciudades = df['ubi'].dropna().unique()
-                    ciudades = [c for c in ciudades if isinstance(c, str)]
-                    st.session_state.ciudades_lista = sorted(ciudades)
-                    df['region'] = df['ubi'].apply(asignar_region)
-                
-                st.session_state.df = df
-                st.session_state.datos_cargados = True
-                st.success(f"✅ Procesadas {len(df)} estaciones con datos válidos")
-                st.rerun()
+        st.error("No se encontró columna de temperatura")
+        return False
+    
+    for col in ['lat', 'lon']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    df = df.dropna(subset=['temp'])
+    
+    if 'ubi' in df.columns:
+        ciudades = df['ubi'].dropna().unique()
+        ciudades = [c for c in ciudades if isinstance(c, str)]
+        st.session_state.ciudades_lista = sorted(ciudades)
+        df['region'] = df['ubi'].apply(asignar_region)
+    
+    st.session_state.df = df
+    st.session_state.datos_cargados = True
+    st.success(f"✅ Datos cargados: {len(df)} estaciones con datos válidos")
+    return True
 
 # =====================================================
-# MOSTRAR RESULTADOS
+# PANTALLA DE INICIO (API Key)
 # =====================================================
-if st.session_state.datos_cargados and st.session_state.df is not None:
+def pantalla_inicio():
+    st.title("🤖 ROBOT VIGILANTE CLIMÁTICO")
+    st.markdown("---")
+    
+    # Columna central para el formulario
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.subheader("🔑 Acceso al sistema")
+        
+        st.markdown("""
+        ### 🌤️ ¿Qué obtendrás al conectar?
+        
+        Al introducir tu API Key de AEMET podrás:
+        
+        - 📊 **Datos climáticos en tiempo real** de toda España
+        - 🗺️ **Mapa interactivo** con colores según temperatura
+        - 🔮 **Predicciones por IA** con tendencias y consejos
+        - 🏆 **Ranking de ciudades** más cálidas y frías
+        - 📍 **Búsqueda por ciudad o región**
+        - 📊 **Comparativa entre ciudades**
+        - ⚠️ **Alertas personalizables** por calor
+        - 💾 **Exportación a CSV** para análisis externo
+        
+        ---
+        
+        ### 🔑 ¿Cómo obtener tu API Key?
+        
+        1. Ve a [opendata.aemet.es](https://opendata.aemet.es)
+        2. Solicita tu clave gratuita (solo necesitas email)
+        3. Copia la clave que recibirás por correo
+        4. Pégala en el campo de abajo
+        """)
+        
+        api_key = st.text_input(
+            "🔑 Introduce tu API Key de AEMET",
+            type="password",
+            placeholder="Ej: eyJhbGciOiJIUzI1NiJ9.eyJzdWI...",
+            help="La clave es gratuita y la obtienes en opendata.aemet.es"
+        )
+        
+        col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+        with col_btn2:
+            conectar = st.button("🚀 CONECTAR CON AEMET", type="primary", use_container_width=True)
+        
+        if conectar:
+            if not api_key:
+                st.error("❌ Por favor, introduce tu API Key")
+            else:
+                if cargar_datos(api_key):
+                    st.session_state.api_key_validada = True
+                    st.rerun()
+
+# =====================================================
+# PANTALLA PRINCIPAL (Datos y análisis)
+# =====================================================
+def pantalla_principal():
     df = st.session_state.df
     
+    # Barra lateral SOLO con el umbral de alerta
+    with st.sidebar:
+        st.header("⚙️ Configuración")
+        
+        # Slider para umbral de alerta
+        umbral = st.slider("🌡️ Umbral de alerta por calor (°C)", 20, 45, st.session_state.umbral_calor, 1)
+        st.session_state.umbral_calor = umbral
+        
+        st.markdown("---")
+        
+        if st.button("🗑️ Limpiar y volver al inicio", use_container_width=True):
+            st.session_state.datos_cargados = False
+            st.session_state.df = None
+            st.session_state.mostrar_resultados = False
+            st.session_state.api_key_validada = False
+            st.session_state.ciudad_actual = None
+            st.session_state.df_ciudad_actual = None
+            st.rerun()
+        
+        st.caption("Datos proporcionados por AEMET")
+        st.caption("📍 Los colores en el mapa indican la temperatura")
+    
+    # Título de la pantalla principal
+    st.title("🤖 ROBOT VIGILANTE CLIMÁTICO")
+    st.markdown("**Datos en tiempo real de AEMET**")
+    st.markdown("---")
+    
+    # =========================================
+    # ESTADÍSTICAS GENERALES
+    # =========================================
     temp_max = df['temp'].max()
     temp_min = df['temp'].min()
     temp_media = df['temp'].mean()
@@ -220,11 +274,15 @@ if st.session_state.datos_cargados and st.session_state.df is not None:
     
     st.markdown("---")
     
+    # =========================================
+    # SELECTOR DE UBICACIÓN
+    # =========================================
     st.subheader("📍 Selecciona una ubicación")
     
     tipo_busqueda = st.radio(
         "Tipo de búsqueda:",
-        ["🔍 Por ciudad", "🗺️ Por provincia/región", "📊 Comparar ciudades"]
+        ["🔍 Por ciudad", "🗺️ Por provincia/región", "📊 Comparar ciudades"],
+        horizontal=True
     )
     
     if tipo_busqueda == "🔍 Por ciudad":
@@ -275,12 +333,16 @@ if st.session_state.datos_cargados and st.session_state.df is not None:
     
     st.markdown("---")
     
+    # =========================================
+    # RESULTADOS DETALLADOS
+    # =========================================
     if st.session_state.mostrar_resultados and st.session_state.df_ciudad_actual is not None:
         df_actual = st.session_state.df_ciudad_actual
         nombre_actual = st.session_state.ciudad_actual
         
         st.subheader(f"📊 Resultados para: {nombre_actual}")
         
+        # Predicción
         st.subheader("🔮 PREDICCIÓN DEL TIEMPO")
         
         if nombre_actual != "Comparativa" and len(df_actual) == 1:
@@ -298,6 +360,7 @@ if st.session_state.datos_cargados and st.session_state.df is not None:
             st.info(f"📊 Mostrando datos de {len(df_actual)} estaciones en {nombre_actual}")
             st.metric("🌡️ Temperatura media", f"{df_actual['temp'].mean():.1f}°C")
         
+        # Mapa
         st.subheader("🗺️ Ubicación en el mapa")
         
         if nombre_actual != "Comparativa" and len(df_actual) == 1 and 'lat' in df_actual.columns:
@@ -316,6 +379,7 @@ if st.session_state.datos_cargados and st.session_state.df is not None:
             except:
                 st.warning("No se pudo cargar el mapa")
         
+        # Gráfico
         st.subheader("📊 Visualización de datos")
         
         if 'ubi' in df_actual.columns:
@@ -332,6 +396,9 @@ if st.session_state.datos_cargados and st.session_state.df is not None:
             st.session_state.df_ciudad_actual = None
             st.rerun()
     
+    # =========================================
+    # TOP NACIONAL
+    # =========================================
     st.subheader("🏆 Top 10 ciudades más cálidas de España")
     
     if 'ubi' in df.columns:
@@ -343,15 +410,29 @@ if st.session_state.datos_cargados and st.session_state.df is not None:
         ax.set_ylabel('Temperatura (°C)')
         st.pyplot(fig)
     
+    # =========================================
+    # ALERTAS
+    # =========================================
     st.subheader("⚠️ Sistema de Alertas Nacional")
     
-    alertas = df[df['temp'] >= umbral_calor]
+    alertas = df[df['temp'] >= st.session_state.umbral_calor]
     if len(alertas) > 0:
-        st.error(f"🔴 ¡ATENCIÓN! {len(alertas)} estaciones superan {umbral_calor}°C")
+        st.error(f"🔴 ¡ATENCIÓN! {len(alertas)} estaciones superan {st.session_state.umbral_calor}°C")
     else:
         st.success(f"✅ Todo bajo control. Máxima: {temp_max}°C")
     
+    # =========================================
+    # EXPORTAR
+    # =========================================
     st.subheader("💾 Exportar Datos")
     fecha_hoy = datetime.now().strftime("%Y-%m-%d_%H-%M")
     csv_data = df.to_csv(index=False).encode('utf-8')
     st.download_button("📥 Descargar CSV", csv_data, f"clima_{fecha_hoy}.csv")
+
+# =====================================================
+# CONTROL DE FLUJO DE PANTALLAS
+# =====================================================
+if not st.session_state.api_key_validada:
+    pantalla_inicio()
+else:
+    pantalla_principal()
