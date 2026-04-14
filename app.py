@@ -338,10 +338,13 @@ def pantalla_principal():
         
         st.subheader(f"📊 Resultados para: {nombre_actual}")
         
-        # Predicción
+        # =========================================
+        # PREDICCIÓN DEL TIEMPO (MEJORADA)
+        # =========================================
         st.subheader("🔮 PREDICCIÓN DEL TIEMPO")
         
         if nombre_actual != "Comparativa" and len(df_actual) == 1:
+            # Caso 1: Una ciudad específica
             prediccion = hacer_prediccion_ciudad(df_actual, nombre_actual)
             if prediccion:
                 col_p1, col_p2, col_p3 = st.columns(3)
@@ -352,11 +355,75 @@ def pantalla_principal():
                 with col_p3:
                     st.metric("📈 Tendencia", prediccion['tendencia'])
                 st.info(f"{prediccion['icono']} **Consejo:** {prediccion['consejo']}")
-        else:
-            st.info(f"📊 Mostrando datos de {len(df_actual)} estaciones en {nombre_actual}")
-            st.metric("🌡️ Temperatura media", f"{df_actual['temp'].mean():.1f}°C")
         
-        # Mapa
+        elif nombre_actual != "Comparativa" and len(df_actual) > 1:
+            # Caso 2: Una provincia/región (múltiples estaciones)
+            temp_media_region = df_actual['temp'].mean()
+            temp_max_region = df_actual['temp'].max()
+            temp_min_region = df_actual['temp'].min()
+            ciudad_mas_calida = df_actual.loc[df_actual['temp'].idxmax(), 'ubi'] if 'ubi' in df_actual.columns else "desconocida"
+            
+            # Predicción basada en la temperatura media de la región
+            if temp_media_region > 30:
+                prediccion_temp = temp_media_region + 1.5
+                tendencia = "📈 EN AUMENTO"
+                consejo = f"¡Mucho calor en {nombre_actual}! La región está experimentando temperaturas muy altas. Mantente hidratado."
+                icono = "🔥"
+            elif temp_media_region > 20:
+                prediccion_temp = temp_media_region + 0.5
+                tendencia = "📈 LEVE ASCENSO"
+                consejo = f"Temperaturas agradables en {nombre_actual}. Ideal para actividades al aire libre."
+                icono = "☀️"
+            elif temp_media_region > 10:
+                prediccion_temp = temp_media_region - 0.5
+                tendencia = "📉 LEVE DESCENSO"
+                consejo = f"Puede refrescar en {nombre_actual} hacia la noche. Lleva una chaqueta."
+                icono = "🍂"
+            else:
+                prediccion_temp = temp_media_region - 1.0
+                tendencia = "📉 EN DESCENSO"
+                consejo = f"¡Hace frío en {nombre_actual}! Abrígate bien si sales."
+                icono = "❄️"
+            
+            # Mostrar predicción regional
+            col_p1, col_p2, col_p3, col_p4 = st.columns(4)
+            with col_p1:
+                st.metric("🌡️ Temp. media región", f"{temp_media_region:.1f}°C")
+            with col_p2:
+                st.metric("🔥 Máxima región", f"{temp_max_region:.1f}°C", delta=ciudad_mas_calida[:15])
+            with col_p3:
+                st.metric("❄️ Mínima región", f"{temp_min_region:.1f}°C")
+            with col_p4:
+                st.metric("🔮 Predicción", f"{prediccion_temp:.1f}°C")
+            
+            st.info(f"{icono} **Consejo para {nombre_actual}:** {consejo}")
+            st.caption(f"📊 Basado en {len(df_actual)} estaciones meteorológicas")
+        
+        else:
+            # Caso 3: Comparativa de ciudades
+            ciudad_mas_calida = df_actual.loc[df_actual['temp'].idxmax(), 'ubi'] if 'ubi' in df_actual.columns else "desconocida"
+            temp_mas_calida = df_actual['temp'].max()
+            
+            st.info(f"📊 **Comparativa activa** - La ciudad más cálida es **{ciudad_mas_calida}** con {temp_mas_calida:.1f}°C")
+            
+            # Predicción para la ciudad más cálida del grupo
+            df_ciudad_calida = df_actual[df_actual['temp'] == temp_mas_calida]
+            if len(df_ciudad_calida) > 0:
+                prediccion = hacer_prediccion_ciudad(df_ciudad_calida, ciudad_mas_calida)
+                if prediccion:
+                    st.subheader("🔮 Predicción para la ciudad más cálida:")
+                    col_p1, col_p2, col_p3 = st.columns(3)
+                    with col_p1:
+                        st.metric("🌡️ Temperatura actual", f"{prediccion['temp_actual']:.1f}°C")
+                    with col_p2:
+                        st.metric("🔮 Predicción próxima", f"{prediccion['prediccion']:.1f}°C")
+                    with col_p3:
+                        st.metric("📈 Tendencia", prediccion['tendencia'])
+                    st.info(f"{prediccion['icono']} **Consejo:** {prediccion['consejo']}")
+        
+        # =========================================
+        # MAPA
+        # =========================================
         st.subheader("🗺️ Ubicación en el mapa")
         
         if nombre_actual != "Comparativa" and len(df_actual) == 1 and 'lat' in df_actual.columns:
@@ -375,7 +442,9 @@ def pantalla_principal():
             except:
                 st.warning("No se pudo cargar el mapa")
         
-        # Visualización de datos
+        # =========================================
+        # VISUALIZACIÓN DE DATOS
+        # =========================================
         st.subheader("📊 Visualización de datos")
         
         if 'ubi' in df_actual.columns:
@@ -405,17 +474,14 @@ def pantalla_principal():
             st.rerun()
     
     # =========================================
-    # TOP 10 ESTACIONES MÁS CÁLIDAS (AGRUPADO POR NOMBRE EXACTO)
+    # TOP 10 ESTACIONES MÁS CÁLIDAS
     # =========================================
     st.subheader("🏆 Top 10 estaciones más cálidas de España")
     
     if 'ubi' in df.columns:
-        # Agrupar por nombre de estación (evitar duplicados por múltiples mediciones)
-        # Usamos max() para mostrar la temperatura más alta registrada en esa estación
         df_agrupado = df.groupby('ubi')['temp'].max().reset_index()
         df_agrupado = df_agrupado.sort_values('temp', ascending=False)
         
-        # Mostrar información de cuántas estaciones únicas hay
         st.caption(f"📊 Total de estaciones únicas: {len(df_agrupado)} | Mostrando las 10 más cálidas")
         
         top10 = df_agrupado.head(10)
